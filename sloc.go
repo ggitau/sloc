@@ -339,7 +339,6 @@ var skipRe []*regexp.Regexp
 
 func main() {
 	flag.Parse()
-	fmt.Printf("Skipping:\n\t %s\n", *skip)
 	skipSlice = strings.Split(*skip, ",")
 
 	skipRe = skipRegExp()

@@ -27,3 +27,6 @@ repository with no compilation done.
 You can generate JSON output with the `-json` flag, if that's easy to parse in
 the programming/scripting language of your choice.
 
+You can skip files and directories using the -skip flag.The skip flag takes works with regular expressions.
+ You can also skip .pb.go files by passing -skip-pb without any value
+
