@@ -7,8 +7,10 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"regexp"
 	"runtime/pprof"
 	"sort"
+	"strings"
 	"text/tabwriter"
 )
 
@@ -66,15 +68,15 @@ type Commenter struct {
 }
 
 var (
-	noComments = Commenter{"\000", "\000", "\000", false}
-	xmlComments = Commenter{"\000", `<!--`, `-->`, false}
-	cComments  = Commenter{`//`, `/*`, `*/`, false}
+	noComments   = Commenter{"\000", "\000", "\000", false}
+	xmlComments  = Commenter{"\000", `<!--`, `-->`, false}
+	cComments    = Commenter{`//`, `/*`, `*/`, false}
 	cssComments  = Commenter{"\000", `/*`, `*/`, false}
-	shComments = Commenter{`#`, "\000", "\000", false}
+	shComments   = Commenter{`#`, "\000", "\000", false}
 	semiComments = Commenter{`;`, "\000", "\000", false}
-	hsComments  = Commenter{`--`, `{-`, `-}`, true}
+	hsComments   = Commenter{`--`, `{-`, `-}`, true}
 	sqlComments  = Commenter{`--`, "\000", "\000", false}
-	pyComments = Commenter{`#`, `"""`, `"""`, false}
+	pyComments   = Commenter{`#`, `"""`, `"""`, false}
 )
 
 type Language struct {
@@ -102,7 +104,9 @@ func (l Language) Update(c []byte, s *Stats) {
 				inLComment = true
 				lp = 0
 			}
-		} else { lp = 0 }
+		} else {
+			lp = 0
+		}
 		if !inLComment && b == sc[sp] {
 			sp++
 			if sp == len(sc) {
@@ -112,14 +116,20 @@ func (l Language) Update(c []byte, s *Stats) {
 				}
 				sp = 0
 			}
-		} else { sp = 0 }
+		} else {
+			sp = 0
+		}
 		if !inLComment && inComment > 0 && b == ec[ep] {
 			ep++
 			if ep == len(ec) {
-				if inComment > 0 { inComment-- }
+				if inComment > 0 {
+					inComment--
+				}
 				ep = 0
 			}
-		} else { ep = 0 }
+		} else {
+			ep = 0
+		}
 
 		if b != byte(' ') && b != byte('\t') && b != byte('\n') && b != byte('\r') {
 			blank = false
@@ -135,7 +145,9 @@ func (l Language) Update(c []byte, s *Stats) {
 				s.CommentLines++
 			} else if blank {
 				s.BlankLines++
-			} else { s.CodeLines++ }
+			} else {
+				s.CodeLines++
+			}
 			blank = true
 			continue
 		}
@@ -215,13 +227,14 @@ func add(n string) {
 	if err != nil {
 		goto invalid
 	}
-	if fi.IsDir() {
+
+	if fi.IsDir() && !toSkip(fi.Name()) {
 		fs, err := ioutil.ReadDir(n)
 		if err != nil {
 			goto invalid
 		}
 		for _, f := range fs {
-			if f.Name()[0] != '.' {
+			if f.Name()[0] != '.' && !toSkip(f.Name()) && !pbSkip(f.Name()) {
 				add(path.Join(n, f.Name()))
 			}
 		}
@@ -254,12 +267,12 @@ func (d LData) Swap(i, j int) {
 }
 
 type LResult struct {
-	Name string
-	FileCount int
-	CodeLines int
+	Name         string
+	FileCount    int
+	CodeLines    int
 	CommentLines int
-	BlankLines int
-	TotalLines int
+	BlankLines   int
+	TotalLines   int
 }
 
 func (r *LResult) Add(a LResult) {
@@ -272,7 +285,9 @@ func (r *LResult) Add(a LResult) {
 
 func printJSON() {
 	bs, err := json.MarshalIndent(info, "", "  ")
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println(string(bs))
 }
 
@@ -314,12 +329,21 @@ func printInfo() {
 
 var (
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-	useJson = flag.Bool("json", false, "JSON-format output")
-	version = flag.Bool("V", false, "display version info and exit")
+	useJson    = flag.Bool("json", false, "JSON-format output")
+	version    = flag.Bool("V", false, "display version info and exit")
+	skip       = flag.String("skip", "", "the folders to skip")
+	skipPb     = flag.Bool("skip-pb", false, "whether or not to skip *pb.go files")
 )
+var skipSlice []string
+var skipRe []*regexp.Regexp
 
 func main() {
 	flag.Parse()
+	fmt.Printf("Skipping:\n\t %s\n", *skip)
+	skipSlice = strings.Split(*skip, ",")
+
+	skipRe = skipRegExp()
+
 	if *version {
 		fmt.Printf("sloc %s\n", VERSION)
 		return
@@ -352,4 +376,39 @@ func main() {
 	} else {
 		printInfo()
 	}
+}
+func skipRegExp() [](*regexp.Regexp) {
+	re := make([]*regexp.Regexp, 0)
+	for _, skip := range skipSlice {
+		if skip == "" {
+			continue
+		}
+		r, err := regexp.Compile(skip)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! %s\n", err)
+			continue
+		}
+
+		re = append(re, r)
+
+	}
+	return re
+}
+func toSkip(name string) bool {
+	for _, re := range skipRe {
+
+		if matches := re.MatchString(name); matches {
+			return true
+		}
+
+	}
+	return false
+}
+func pbSkip(name string) bool {
+	re, err := regexp.Compile(".*pb.go")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  ! %s\n", err)
+		return false
+	}
+	return *skipPb && re.MatchString(name)
 }
